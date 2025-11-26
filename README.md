@@ -155,21 +155,39 @@ winget install Microsoft.AzureCLI
 
 #### Step 2: Azure Service Principal
 
-Use the following Service Principal for authentication:
+You need a Service Principal with the following attributes (provided by instructor):
 
-| Field | Value |
-|-------|-------|
-| Display Name | `BCSAI2025-DEVOPS-STUDENTS-A-SP` |
-| Tenant ID | `5ca2bc70-353c-4d1f-b7d7-7f2b2259df68` |
-| App ID (Client ID) | `<provided by instructor>` |
-| Password (Client Secret) | `<provided by instructor>` |
+| Attribute | Description | Example |
+|-----------|-------------|---------|
+| `appId` | Application (client) ID | `13c5b060-82ec-42bb-94fa-dd57ddeb74db` |
+| `password` | Client secret value | `0uw8Q~Cosgwq9y-Fp_...` |
+| `tenant` | Azure AD tenant ID | `5ca2bc70-353c-4d1f-b7d7-7f2b2259df68` |
+
+The instructor will provide credentials in this format:
+```json
+{
+  "appId": "<AZURE_CLIENT_ID>",
+  "displayName": "BCSAI2025-DEVOPS-STUDENTS-A-SP",
+  "password": "<AZURE_CLIENT_SECRET>",
+  "tenant": "5ca2bc70-353c-4d1f-b7d7-7f2b2259df68"
+}
+```
 
 #### Step 3: Create the Azure VM
 
-Run these commands to create and configure the VM:
+Run these Azure CLI (`az`) commands to create and configure the VM:
+
+| Command | Description |
+|---------|-------------|
+| `az login` | Authenticate with Azure using service principal |
+| `ssh-keygen` | Generate SSH key pair for VM access |
+| `az vm create` | Create the virtual machine |
+| `az vm open-port` | Open port 5000 in the firewall |
+| `az vm show` | Get VM details (public IP) |
+| `ssh` | Connect to VM and install Docker |
 
 ```bash
-# 1. Login with service principal
+# 1. Login with service principal (use appId, password, tenant from Step 2)
 az login --service-principal \
   -u <AZURE_CLIENT_ID> \
   -p <AZURE_CLIENT_SECRET> \
@@ -178,7 +196,7 @@ az login --service-principal \
 # 2. Generate SSH key pair for VM access
 ssh-keygen -t rsa -b 4096 -f ~/.ssh/cd-exercise-vm-key -N "" -C "cd-exercise-vm"
 
-# 3. Create the VM
+# 3. Create the VM (az vm create)
 az vm create \
   --resource-group BCSAI2025-DEVOPS-STUDENTS-A \
   --name cd-exercise-vm \
@@ -188,14 +206,14 @@ az vm create \
   --ssh-key-values ~/.ssh/cd-exercise-vm-key.pub \
   --public-ip-sku Standard
 
-# 4. Open port 5000 for the application
+# 4. Open port 5000 for the application (az vm open-port)
 az vm open-port \
   --resource-group BCSAI2025-DEVOPS-STUDENTS-A \
   --name cd-exercise-vm \
   --port 5000 \
   --priority 1010
 
-# 5. Get the VM public IP address
+# 5. Get the VM public IP address (az vm show) - SAVE THIS IP!
 az vm show \
   --resource-group BCSAI2025-DEVOPS-STUDENTS-A \
   --name cd-exercise-vm \
@@ -203,23 +221,23 @@ az vm show \
   --query publicIps \
   --output tsv
 
-# 6. Install Docker on the VM (replace <VM_IP> with the IP from step 5)
+# 6. Install Docker on the VM via SSH (replace <VM_IP> with the IP from step 5)
 ssh -i ~/.ssh/cd-exercise-vm-key azureuser@<VM_IP> "curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker azureuser"
 ```
 
 #### Step 4: Configure GitHub Secrets
 
-Go to your repository **Settings > Secrets and variables > Actions** and add:
+Go to your repository **Settings > Secrets and variables > Actions** and add these secrets:
 
-| Secret | Value | How to Get |
-|--------|-------|------------|
-| `AZURE_CLIENT_ID` | Service Principal App ID | Provided by instructor |
-| `AZURE_CLIENT_SECRET` | Service Principal Password | Provided by instructor |
-| `AZURE_TENANT_ID` | `5ca2bc70-353c-4d1f-b7d7-7f2b2259df68` | Fixed value |
-| `AZURE_SUBSCRIPTION_ID` | Azure Subscription ID | Run `az account show --query id -o tsv` |
-| `VM_HOST` | VM public IP address | From Step 3.5 above |
-| `VM_USERNAME` | `azureuser` | Fixed value |
-| `VM_SSH_PRIVATE_KEY` | SSH private key content | Run `cat ~/.ssh/cd-exercise-vm-key` |
+| Secret Name | Source | How to Get the Value |
+|-------------|--------|----------------------|
+| `AZURE_CLIENT_ID` | Service Principal `appId` | From Step 2 (instructor provided) |
+| `AZURE_CLIENT_SECRET` | Service Principal `password` | From Step 2 (instructor provided) |
+| `AZURE_TENANT_ID` | Service Principal `tenant` | `5ca2bc70-353c-4d1f-b7d7-7f2b2259df68` |
+| `AZURE_SUBSCRIPTION_ID` | Azure Subscription | Run: `az account show --query id -o tsv` |
+| `VM_HOST` | VM public IP | From Step 3.5 (`az vm show` output) |
+| `VM_USERNAME` | VM admin user | `azureuser` (fixed) |
+| `VM_SSH_PRIVATE_KEY` | SSH private key | Run: `cat ~/.ssh/cd-exercise-vm-key` (entire file content) |
 
 #### Step 5: Update Workflow with VM IP
 
