@@ -177,14 +177,14 @@ The instructor will provide credentials in this format:
 
 Run these Azure CLI (`az`) commands to create and configure the VM:
 
-| Command | Description |
-|---------|-------------|
-| `az login` | Authenticate with Azure using service principal |
-| `ssh-keygen` | Generate SSH key pair for VM access |
-| `az vm create` | Create the virtual machine |
-| `az vm open-port` | Open port 5000 in the firewall |
-| `az vm show` | Get VM details (public IP) |
-| `ssh` | Connect to VM and install Docker |
+| # | Command | Description |
+|---|---------|-------------|
+| 1 | `az login --service-principal -u <appId> -p <password> --tenant <tenant>` | Authenticate with Azure |
+| 2 | `ssh-keygen -t rsa -b 4096 -f ~/.ssh/cd-exercise-vm-key -N ""` | Generate SSH key pair |
+| 3 | `az vm create --resource-group <RG> --name <VM_NAME> --image Ubuntu2204 ...` | Create the VM |
+| 4 | `az vm open-port --resource-group <RG> --name <VM_NAME> --port 5000` | Open port 5000 |
+| 5 | `az vm show --resource-group <RG> --name <VM_NAME> --show-details --query publicIps` | Get public IP |
+| 6 | `ssh -i ~/.ssh/cd-exercise-vm-key azureuser@<VM_IP> "curl -fsSL https://get.docker.com \| sh"` | Install Docker |
 
 ```bash
 # 1. Login with service principal (use appId, password, tenant from Step 2)
