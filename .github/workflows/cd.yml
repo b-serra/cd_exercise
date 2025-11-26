@@ -102,9 +102,7 @@ jobs:
     needs: build-and-push
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/07-azure-deploy'
 
-    environment:
-      name: production
-      url: http://${{ secrets.VM_HOST }}:5000
+    environment: production
 
     steps:
       - name: Deploy to VM via SSH
