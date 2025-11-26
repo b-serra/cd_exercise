@@ -1,0 +1,245 @@
+# CD Pipeline - Branch 04: Production Deployment
+# This workflow introduces production deployment with manual approvals.
+#
+# New concepts introduced:
+# - Manual approval gates
+# - Production environment protection rules
+# - Deployment strategies (blue-green simulation)
+# - Production health checks
+# - Deployment notifications
+
+name: CD Pipeline
+
+on:
+  push:
+    branches: [main, "04-production-deploy"]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Job 1: Run tests
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest --cov=src --cov-report=xml
+
+  # Job 2: Build and push to registry
+  build-and-push:
+    name: Build and Push Image
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push'
+
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image-tag: ${{ github.sha }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Job 3: Deploy to Staging
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    environment:
+      name: staging
+      url: http://staging.example.com
+
+    steps:
+      - name: Deploy to Staging
+        run: |
+          echo "Deploying to staging environment..."
+          echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          echo "Deployment to staging complete!"
+
+  # Job 4: Smoke Tests on Staging
+  smoke-tests-staging:
+    name: Smoke Tests (Staging)
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+
+    steps:
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests against staging..."
+          echo "All smoke tests passed!"
+
+  # Job 5: Deploy to Production (NEW - with manual approval)
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: smoke-tests-staging
+
+    # NEW: Production environment with required reviewers
+    # Configure this in GitHub repo settings: Settings > Environments > production
+    # Add required reviewers and optional wait timer
+    environment:
+      name: production
+      url: http://production.example.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # NEW: Blue-Green Deployment Strategy
+      - name: Prepare Blue-Green Deployment
+        run: |
+          echo "Starting blue-green deployment..."
+          echo "Current production (blue): running"
+          echo "New version (green): ${{ github.sha }}"
+
+      - name: Deploy Green Environment
+        run: |
+          echo "Deploying new version to green environment..."
+          echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          # In reality:
+          # - Deploy new container to green slot
+          # - Wait for it to be healthy
+          echo "Green environment deployed!"
+
+      - name: Health Check Green Environment
+        run: |
+          echo "Running health checks on green environment..."
+          # curl -f http://green.example.com/health
+          # curl -f http://green.example.com/health/ready
+          echo "Green environment is healthy!"
+
+      - name: Switch Traffic to Green
+        run: |
+          echo "Switching traffic from blue to green..."
+          # In reality: Update load balancer / DNS
+          echo "Traffic switched to green (new production)!"
+
+      - name: Decommission Blue Environment
+        run: |
+          echo "Keeping blue environment for potential rollback..."
+          echo "Blue environment will be decommissioned in 1 hour if no issues"
+
+  # Job 6: Production Health Checks (NEW)
+  health-check-production:
+    name: Production Health Check
+    runs-on: ubuntu-latest
+    needs: deploy-production
+
+    steps:
+      - name: Wait for deployment stabilization
+        run: |
+          echo "Waiting for production deployment to stabilize..."
+          sleep 15
+
+      - name: Run production health checks
+        run: |
+          echo "Running comprehensive health checks on production..."
+          # In reality:
+          # curl -f http://production.example.com/health
+          # curl -f http://production.example.com/health/ready
+          # curl -f http://production.example.com/health/live
+          echo "Health check: OK"
+          echo "Readiness check: OK"
+          echo "Liveness check: OK"
+
+      - name: Verify production version
+        run: |
+          echo "Verifying production version..."
+          echo "Expected version: ${{ github.sha }}"
+          # ACTUAL=$(curl -s http://production.example.com/api/version | jq -r '.version')
+          echo "Production version verified!"
+
+  # Job 7: Notify Deployment (NEW)
+  notify-deployment:
+    name: Notify Deployment
+    runs-on: ubuntu-latest
+    needs: health-check-production
+    if: always()
+
+    steps:
+      - name: Send deployment notification
+        run: |
+          if [ "${{ needs.health-check-production.result }}" == "success" ]; then
+            echo "Deployment successful!"
+            echo "Sending success notification..."
+            # In reality: Send to Slack, Teams, email, etc.
+            # curl -X POST -H 'Content-type: application/json' \
+            #   --data '{"text":"Production deployment successful: ${{ github.sha }}"}' \
+            #   $SLACK_WEBHOOK_URL
+          else
+            echo "Deployment failed or was skipped"
+            echo "Sending failure notification..."
+          fi
+
+  # Summary job
+  cd-success:
+    name: CD Success
+    runs-on: ubuntu-latest
+    needs: [test, build-and-push, deploy-staging, smoke-tests-staging, deploy-production, health-check-production]
+    if: always()
+
+    steps:
+      - name: Pipeline Summary
+        run: |
+          echo "=== CD Pipeline Summary ==="
+          echo "Test: ${{ needs.test.result }}"
+          echo "Build & Push: ${{ needs.build-and-push.result }}"
+          echo "Staging Deploy: ${{ needs.deploy-staging.result }}"
+          echo "Staging Smoke Tests: ${{ needs.smoke-tests-staging.result }}"
+          echo "Production Deploy: ${{ needs.deploy-production.result }}"
+          echo "Production Health: ${{ needs.health-check-production.result }}"
+          echo "=========================="

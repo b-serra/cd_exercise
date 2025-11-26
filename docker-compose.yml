@@ -1,0 +1,66 @@
+version: "3.8"
+
+services:
+  # Development service
+  app-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+      - APP_VERSION=0.1.0-dev
+    volumes:
+      - ./src:/app/src:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # Staging service (simulates staging environment)
+  app-staging:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - "5001:5000"
+    environment:
+      - FLASK_ENV=staging
+      - APP_VERSION=0.1.0-staging
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Production service (simulates production environment)
+  app-production:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - "5002:5000"
+    environment:
+      - FLASK_ENV=production
+      - APP_VERSION=0.1.0
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
