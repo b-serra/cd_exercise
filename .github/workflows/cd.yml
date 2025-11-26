@@ -138,6 +138,7 @@ jobs:
             --registry-password ${{ secrets.GITHUB_TOKEN }} \
             --dns-name-label ${{ env.AZURE_CONTAINER_NAME }} \
             --ports 5000 \
+            --os-type Linux \
             --cpu 1 \
             --memory 1 \
             --environment-variables \
