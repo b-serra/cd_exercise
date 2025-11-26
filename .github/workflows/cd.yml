@@ -15,6 +15,7 @@ on:
     branches: [main, "04-production-deploy"]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
