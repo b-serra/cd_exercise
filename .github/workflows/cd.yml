@@ -9,6 +9,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   # Basic CI job - runs tests to ensure code works
