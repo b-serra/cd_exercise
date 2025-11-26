@@ -131,67 +131,115 @@ Basic project structure with a Flask API application. No CD pipeline yet.
 - Docker container deployment on cloud infrastructure
 - GitHub Container Registry integration
 
-#### Azure Setup Requirements
+#### Prerequisites for Branch 07
 
-To use this branch, you need to configure the following GitHub secrets:
+Before running the pipeline on this branch, you must:
 
-| Secret | Description |
-|--------|-------------|
-| `AZURE_CLIENT_ID` | Service Principal App ID |
-| `AZURE_CLIENT_SECRET` | Service Principal Password |
-| `AZURE_TENANT_ID` | Azure AD Tenant ID |
-| `AZURE_SUBSCRIPTION_ID` | Azure Subscription ID |
-| `VM_HOST` | Azure VM public IP address |
-| `VM_USERNAME` | VM SSH username (typically `azureuser`) |
-| `VM_SSH_PRIVATE_KEY` | SSH private key for VM access |
+1. **Install Azure CLI** on your local machine
+2. **Have access to an Azure Service Principal** with permissions to create VMs
+3. **Create an Azure VM** with Docker installed
+4. **Configure GitHub Secrets** in your repository
 
-#### Service Principal Configuration
+#### Step 1: Install Azure CLI
+
+```bash
+# macOS
+brew install azure-cli
+
+# Ubuntu/Debian
+curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+
+# Windows (PowerShell)
+winget install Microsoft.AzureCLI
+```
+
+#### Step 2: Azure Service Principal
 
 Use the following Service Principal for authentication:
 
-```json
-{
-  "appId": "<AZURE_CLIENT_ID>",
-  "displayName": "BCSAI2025-DEVOPS-STUDENTS-A-SP",
-  "password": "<AZURE_CLIENT_SECRET>",
-  "tenant": "5ca2bc70-353c-4d1f-b7d7-7f2b2259df68"
-}
-```
+| Field | Value |
+|-------|-------|
+| Display Name | `BCSAI2025-DEVOPS-STUDENTS-A-SP` |
+| Tenant ID | `5ca2bc70-353c-4d1f-b7d7-7f2b2259df68` |
+| App ID (Client ID) | `<provided by instructor>` |
+| Password (Client Secret) | `<provided by instructor>` |
 
-#### Azure VM Requirements
+#### Step 3: Create the Azure VM
 
-The target VM must have:
-- Docker installed
-- Port 5000 open in Network Security Group (NSG)
-- SSH access enabled (port 22)
-
-#### Creating the Azure VM
+Run these commands to create and configure the VM:
 
 ```bash
-# Login with service principal
+# 1. Login with service principal
 az login --service-principal \
   -u <AZURE_CLIENT_ID> \
   -p <AZURE_CLIENT_SECRET> \
   --tenant 5ca2bc70-353c-4d1f-b7d7-7f2b2259df68
 
-# Create VM with SSH key
+# 2. Generate SSH key pair for VM access
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/cd-exercise-vm-key -N "" -C "cd-exercise-vm"
+
+# 3. Create the VM
 az vm create \
   --resource-group BCSAI2025-DEVOPS-STUDENTS-A \
   --name cd-exercise-vm \
   --image Ubuntu2204 \
   --size Standard_B1s \
   --admin-username azureuser \
-  --generate-ssh-keys
+  --ssh-key-values ~/.ssh/cd-exercise-vm-key.pub \
+  --public-ip-sku Standard
 
-# Open port 5000
+# 4. Open port 5000 for the application
 az vm open-port \
   --resource-group BCSAI2025-DEVOPS-STUDENTS-A \
   --name cd-exercise-vm \
-  --port 5000
+  --port 5000 \
+  --priority 1010
 
-# Install Docker on the VM (via SSH)
-ssh azureuser@<VM_IP> "curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker azureuser"
+# 5. Get the VM public IP address
+az vm show \
+  --resource-group BCSAI2025-DEVOPS-STUDENTS-A \
+  --name cd-exercise-vm \
+  --show-details \
+  --query publicIps \
+  --output tsv
+
+# 6. Install Docker on the VM (replace <VM_IP> with the IP from step 5)
+ssh -i ~/.ssh/cd-exercise-vm-key azureuser@<VM_IP> "curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker azureuser"
 ```
+
+#### Step 4: Configure GitHub Secrets
+
+Go to your repository **Settings > Secrets and variables > Actions** and add:
+
+| Secret | Value | How to Get |
+|--------|-------|------------|
+| `AZURE_CLIENT_ID` | Service Principal App ID | Provided by instructor |
+| `AZURE_CLIENT_SECRET` | Service Principal Password | Provided by instructor |
+| `AZURE_TENANT_ID` | `5ca2bc70-353c-4d1f-b7d7-7f2b2259df68` | Fixed value |
+| `AZURE_SUBSCRIPTION_ID` | Azure Subscription ID | Run `az account show --query id -o tsv` |
+| `VM_HOST` | VM public IP address | From Step 3.5 above |
+| `VM_USERNAME` | `azureuser` | Fixed value |
+| `VM_SSH_PRIVATE_KEY` | SSH private key content | Run `cat ~/.ssh/cd-exercise-vm-key` |
+
+#### Step 5: Update Workflow with VM IP
+
+Edit `.github/workflows/cd.yml` and update the `VM_PUBLIC_IP` environment variable with your VM's IP address:
+
+```yaml
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  VM_PUBLIC_IP: "<YOUR_VM_IP_HERE>"  # Update this!
+```
+
+#### Step 6: Run the Pipeline
+
+Once all secrets are configured:
+
+1. Push a commit to the `07-azure-deploy` branch, or
+2. Go to **Actions > CD Pipeline > Run workflow** and select branch `07-azure-deploy`
+
+After successful deployment, access the application at: `http://<VM_IP>:5000`
 
 ## API Endpoints
 
