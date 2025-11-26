@@ -17,6 +17,7 @@ This repository demonstrates progressive CD pipeline development. Each branch in
 | `04-production-deploy` | Production | Manual approval and production deployment |
 | `05-rollback` | Recovery | Implementing rollback capabilities |
 | `06-complete` | Integration | Complete CD pipeline with all stages |
+| `07-azure-deploy` | Cloud Deployment | Real deployment to Azure VM via SSH |
 
 ## Project Structure
 
@@ -124,6 +125,73 @@ Basic project structure with a Flask API application. No CD pipeline yet.
 - Complete CD pipeline with all stages
 - Parallel jobs where possible
 - Comprehensive deployment strategy
+
+### 07-azure-deploy - Azure VM Deployment
+- Real deployment to Azure VM via SSH
+- Docker container deployment on cloud infrastructure
+- GitHub Container Registry integration
+
+#### Azure Setup Requirements
+
+To use this branch, you need to configure the following GitHub secrets:
+
+| Secret | Description |
+|--------|-------------|
+| `AZURE_CLIENT_ID` | Service Principal App ID |
+| `AZURE_CLIENT_SECRET` | Service Principal Password |
+| `AZURE_TENANT_ID` | Azure AD Tenant ID |
+| `AZURE_SUBSCRIPTION_ID` | Azure Subscription ID |
+| `VM_HOST` | Azure VM public IP address |
+| `VM_USERNAME` | VM SSH username (typically `azureuser`) |
+| `VM_SSH_PRIVATE_KEY` | SSH private key for VM access |
+
+#### Service Principal Configuration
+
+Use the following Service Principal for authentication:
+
+```json
+{
+  "appId": "<AZURE_CLIENT_ID>",
+  "displayName": "BCSAI2025-DEVOPS-STUDENTS-A-SP",
+  "password": "<AZURE_CLIENT_SECRET>",
+  "tenant": "5ca2bc70-353c-4d1f-b7d7-7f2b2259df68"
+}
+```
+
+#### Azure VM Requirements
+
+The target VM must have:
+- Docker installed
+- Port 5000 open in Network Security Group (NSG)
+- SSH access enabled (port 22)
+
+#### Creating the Azure VM
+
+```bash
+# Login with service principal
+az login --service-principal \
+  -u <AZURE_CLIENT_ID> \
+  -p <AZURE_CLIENT_SECRET> \
+  --tenant 5ca2bc70-353c-4d1f-b7d7-7f2b2259df68
+
+# Create VM with SSH key
+az vm create \
+  --resource-group BCSAI2025-DEVOPS-STUDENTS-A \
+  --name cd-exercise-vm \
+  --image Ubuntu2204 \
+  --size Standard_B1s \
+  --admin-username azureuser \
+  --generate-ssh-keys
+
+# Open port 5000
+az vm open-port \
+  --resource-group BCSAI2025-DEVOPS-STUDENTS-A \
+  --name cd-exercise-vm \
+  --port 5000
+
+# Install Docker on the VM (via SSH)
+ssh azureuser@<VM_IP> "curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker azureuser"
+```
 
 ## API Endpoints
 
