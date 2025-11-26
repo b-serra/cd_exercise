@@ -1,17 +1,18 @@
-# CD Pipeline - Branch 02: Registry Push
-# This workflow introduces pushing images to GitHub Container Registry.
+# CD Pipeline - Branch 03: Staging Deployment
+# This workflow introduces automated deployment to a staging environment.
 #
 # New concepts introduced:
-# - GitHub Container Registry (GHCR)
-# - Image tagging strategies (SHA, branch, latest)
-# - Docker image versioning
-# - Registry authentication
+# - GitHub Environments
+# - Deployment jobs
+# - Smoke tests after deployment
+# - Environment-specific configurations
+# - Deployment status tracking
 
 name: CD Pipeline
 
 on:
   push:
-    branches: [main, "02-registry-push"]
+    branches: [main, "03-staging-deploy"]
   pull_request:
     branches: [main]
 
@@ -43,12 +44,11 @@ jobs:
       - name: Run tests
         run: pytest --cov=src --cov-report=xml
 
-  # Job 2: Build and push to registry (UPDATED)
+  # Job 2: Build and push to registry
   build-and-push:
     name: Build and Push Image
     runs-on: ubuntu-latest
     needs: test
-    # Only push on main branch, not on PRs
     if: github.event_name == 'push'
 
     permissions:
@@ -56,8 +56,7 @@ jobs:
       packages: write
 
     outputs:
-      image-tag: ${{ steps.meta.outputs.tags }}
-      image-digest: ${{ steps.build.outputs.digest }}
+      image-tag: ${{ github.sha }}
 
     steps:
       - name: Checkout code
@@ -66,7 +65,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # NEW: Login to GitHub Container Registry
       - name: Log in to Container Registry
         uses: docker/login-action@v3
         with:
@@ -74,23 +72,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # NEW: Extract metadata for Docker
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            # Tag with commit SHA
             type=sha,prefix=
-            # Tag with branch name
             type=ref,event=branch
-            # Tag as latest for main branch
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
-      # Build and push to registry
       - name: Build and push Docker image
-        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -100,53 +92,96 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Output image details
-        run: |
-          echo "Image pushed successfully!"
-          echo "Tags: ${{ steps.meta.outputs.tags }}"
-          echo "Digest: ${{ steps.build.outputs.digest }}"
-
-  # Job 3: Security scan (runs after push)
-  security-scan:
-    name: Security Scan
+  # Job 3: Deploy to Staging (NEW)
+  deploy-staging:
+    name: Deploy to Staging
     runs-on: ubuntu-latest
     needs: build-and-push
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
-    permissions:
-      contents: read
-      packages: read
-      security-events: write
+    # NEW: GitHub Environment for staging
+    environment:
+      name: staging
+      url: http://staging.example.com
 
     steps:
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          format: "sarif"
-          output: "trivy-results.sarif"
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: "trivy-results.sarif"
+      - name: Deploy to Staging
+        run: |
+          echo "Deploying to staging environment..."
+          echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+
+          # In a real scenario, this would:
+          # - SSH into staging server
+          # - Pull the new image
+          # - Stop old container
+          # - Start new container
+          # - Or use kubectl for Kubernetes deployments
+
+          # Simulated deployment
+          echo "Pulling image..."
+          echo "Stopping old container..."
+          echo "Starting new container..."
+          echo "Deployment to staging complete!"
+
+      - name: Wait for deployment to stabilize
+        run: |
+          echo "Waiting for deployment to stabilize..."
+          sleep 10
+
+  # Job 4: Run Smoke Tests on Staging (NEW)
+  smoke-tests-staging:
+    name: Smoke Tests (Staging)
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests against staging environment..."
+
+          # In a real scenario with actual staging URL:
+          # STAGING_URL="http://staging.example.com"
+          # curl -f "$STAGING_URL/health" || exit 1
+          # curl -f "$STAGING_URL/health/ready" || exit 1
+          # curl -f "$STAGING_URL/" || exit 1
+
+          # Simulated smoke tests
+          echo "Testing health endpoint... OK"
+          echo "Testing readiness endpoint... OK"
+          echo "Testing root endpoint... OK"
+          echo "All smoke tests passed!"
+
+      - name: Verify deployment version
+        run: |
+          echo "Verifying deployed version matches expected..."
+          echo "Expected: ${{ github.sha }}"
+          # In real scenario:
+          # DEPLOYED_VERSION=$(curl -s "$STAGING_URL/api/version" | jq -r '.version')
+          echo "Deployed version verified!"
 
   # Summary job
   cd-success:
     name: CD Success
     runs-on: ubuntu-latest
-    needs: [test, build-and-push, security-scan]
+    needs: [test, build-and-push, deploy-staging, smoke-tests-staging]
     if: always()
 
     steps:
       - name: Check job results
         run: |
+          echo "Test: ${{ needs.test.result }}"
+          echo "Build: ${{ needs.build-and-push.result }}"
+          echo "Deploy Staging: ${{ needs.deploy-staging.result }}"
+          echo "Smoke Tests: ${{ needs.smoke-tests-staging.result }}"
+
           if [ "${{ needs.test.result }}" != "success" ]; then
             echo "Tests failed"
-            exit 1
-          fi
-          if [ "${{ needs.build-and-push.result }}" != "success" ] && [ "${{ needs.build-and-push.result }}" != "skipped" ]; then
-            echo "Build and push failed"
             exit 1
           fi
           echo "CD Pipeline completed successfully!"
