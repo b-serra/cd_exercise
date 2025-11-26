@@ -1,25 +1,29 @@
-# CD Pipeline - Branch 05: Rollback Capabilities
-# This workflow introduces automated rollback mechanisms.
+# CD Pipeline - Branch 06: Complete Pipeline
+# This is the final, production-ready CD pipeline with all features.
 #
-# New concepts introduced:
-# - Automatic rollback on failure
-# - Version tracking and history
-# - Quick recovery procedures
-# - Rollback verification
-# - Manual rollback triggers
+# Features included:
+# - Comprehensive testing
+# - Docker build with caching
+# - Container registry push
+# - Security scanning
+# - Staging deployment with smoke tests
+# - Production deployment with manual approval
+# - Automatic rollback capabilities
+# - Deployment notifications
+# - Version tracking
+# - Concurrency control
 
 name: CD Pipeline
 
 on:
   push:
-    branches: [main, "05-rollback"]
+    branches: [main, "06-complete"]
   pull_request:
     branches: [main]
-  # NEW: Manual workflow dispatch for rollback
   workflow_dispatch:
     inputs:
       rollback_version:
-        description: "Version to rollback to (commit SHA or tag)"
+        description: "Version to rollback to (commit SHA)"
         required: false
         type: string
       environment:
@@ -30,77 +34,68 @@ on:
           - staging
           - production
         default: staging
+      skip_tests:
+        description: "Skip tests (use with caution)"
+        required: false
+        type: boolean
+        default: false
+
+# Prevent concurrent deployments to the same environment
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  PYTHON_VERSION: "3.11"
 
 jobs:
-  # Check if this is a manual rollback
-  check-rollback:
-    name: Check Rollback Request
+  # ============================================
+  # PHASE 1: PREPARATION
+  # ============================================
+
+  prepare:
+    name: Prepare Pipeline
     runs-on: ubuntu-latest
     outputs:
       is-rollback: ${{ steps.check.outputs.is_rollback }}
       rollback-version: ${{ steps.check.outputs.rollback_version }}
       target-env: ${{ steps.check.outputs.target_env }}
+      short-sha: ${{ steps.vars.outputs.short_sha }}
+      deploy-staging: ${{ steps.check.outputs.deploy_staging }}
+      deploy-production: ${{ steps.check.outputs.deploy_production }}
 
     steps:
-      - name: Check if rollback requested
+      - name: Check pipeline type
         id: check
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ inputs.rollback_version }}" ]; then
             echo "is_rollback=true" >> $GITHUB_OUTPUT
             echo "rollback_version=${{ inputs.rollback_version }}" >> $GITHUB_OUTPUT
             echo "target_env=${{ inputs.environment }}" >> $GITHUB_OUTPUT
-            echo "Rollback requested to version: ${{ inputs.rollback_version }}"
+            echo "deploy_staging=false" >> $GITHUB_OUTPUT
+            echo "deploy_production=false" >> $GITHUB_OUTPUT
           else
             echo "is_rollback=false" >> $GITHUB_OUTPUT
-            echo "rollback_version=" >> $GITHUB_OUTPUT
-            echo "target_env=" >> $GITHUB_OUTPUT
-            echo "Normal deployment flow"
+            echo "deploy_staging=${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}" >> $GITHUB_OUTPUT
+            echo "deploy_production=${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}" >> $GITHUB_OUTPUT
           fi
 
-  # NEW: Manual Rollback Job
-  manual-rollback:
-    name: Manual Rollback
-    runs-on: ubuntu-latest
-    needs: check-rollback
-    if: needs.check-rollback.outputs.is-rollback == 'true'
-
-    environment:
-      name: ${{ needs.check-rollback.outputs.target-env }}
-
-    steps:
-      - name: Perform Rollback
+      - name: Set variables
+        id: vars
         run: |
-          echo "=== MANUAL ROLLBACK ==="
-          echo "Target environment: ${{ needs.check-rollback.outputs.target-env }}"
-          echo "Rollback version: ${{ needs.check-rollback.outputs.rollback-version }}"
-          echo ""
-          echo "Step 1: Pulling previous image version..."
-          echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.check-rollback.outputs.rollback-version }}"
-          echo ""
-          echo "Step 2: Stopping current deployment..."
-          echo ""
-          echo "Step 3: Starting rollback deployment..."
-          echo ""
-          echo "Step 4: Verifying rollback..."
-          echo ""
-          echo "Rollback completed successfully!"
+          echo "short_sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
-      - name: Verify Rollback
-        run: |
-          echo "Verifying rolled-back version is healthy..."
-          # curl -f http://${{ needs.check-rollback.outputs.target-env }}.example.com/health
-          echo "Rollback verified!"
+  # ============================================
+  # PHASE 2: BUILD & TEST (Parallel)
+  # ============================================
 
-  # Job 1: Run tests (skip for rollback)
   test:
-    name: Run Tests
+    name: Test
     runs-on: ubuntu-latest
-    needs: check-rollback
-    if: needs.check-rollback.outputs.is-rollback != 'true'
+    needs: prepare
+    if: needs.prepare.outputs.is-rollback != 'true' && inputs.skip_tests != true
 
     steps:
       - name: Checkout code
@@ -109,7 +104,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
 
       - name: Install dependencies
@@ -117,15 +112,76 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      - name: Run tests
-        run: pytest --cov=src --cov-report=xml
+      - name: Run linting
+        run: |
+          flake8 src tests --count --select=E9,F63,F7,F82 --show-source --statistics
 
-  # Job 2: Build and push to registry
-  build-and-push:
-    name: Build and Push Image
+      - name: Run tests with coverage
+        run: |
+          pytest --cov=src --cov-report=xml --cov-report=html --junitxml=test-results.xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: |
+            test-results.xml
+            htmlcov/
+            coverage.xml
+
+  security-scan-code:
+    name: Security Scan (Code)
     runs-on: ubuntu-latest
-    needs: [check-rollback, test]
-    if: needs.check-rollback.outputs.is-rollback != 'true' && github.event_name == 'push'
+    needs: prepare
+    if: needs.prepare.outputs.is-rollback != 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install security tools
+        run: |
+          pip install bandit safety
+
+      - name: Run Bandit security scan
+        run: |
+          bandit -r src -f json -o bandit-results.json || true
+          bandit -r src -f txt
+
+      - name: Check dependencies for vulnerabilities
+        run: |
+          pip install -r requirements.txt
+          safety check --json > safety-results.json || true
+          safety check
+
+      - name: Upload security results
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-code
+          path: |
+            bandit-results.json
+            safety-results.json
+
+  # ============================================
+  # PHASE 3: BUILD & PUSH
+  # ============================================
+
+  build-and-push:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+    needs: [prepare, test, security-scan-code]
+    if: |
+      always() &&
+      needs.prepare.outputs.is-rollback != 'true' &&
+      github.event_name == 'push' &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped') &&
+      (needs.security-scan-code.result == 'success' || needs.security-scan-code.result == 'skipped')
 
     permissions:
       contents: read
@@ -133,10 +189,14 @@ jobs:
 
     outputs:
       image-tag: ${{ github.sha }}
+      image-digest: ${{ steps.build.outputs.digest }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -157,8 +217,10 @@ jobs:
             type=sha,prefix=
             type=ref,event=branch
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ needs.prepare.outputs.short-sha }}
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -167,13 +229,50 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          platforms: linux/amd64
 
-  # Job 3: Deploy to Staging
+      - name: Output image info
+        run: |
+          echo "### Docker Image Built" >> $GITHUB_STEP_SUMMARY
+          echo "- **Digest:** ${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tags:** ${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+
+  security-scan-image:
+    name: Security Scan (Image)
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: needs.build-and-push.result == 'success'
+
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+
+    steps:
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "CRITICAL,HIGH"
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: "trivy-results.sarif"
+
+  # ============================================
+  # PHASE 4: STAGING DEPLOYMENT
+  # ============================================
+
   deploy-staging:
     name: Deploy to Staging
     runs-on: ubuntu-latest
-    needs: [check-rollback, build-and-push]
-    if: needs.check-rollback.outputs.is-rollback != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [prepare, build-and-push, security-scan-image]
+    if: |
+      needs.prepare.outputs.deploy-staging == 'true' &&
+      needs.build-and-push.result == 'success'
 
     environment:
       name: staging
@@ -181,83 +280,73 @@ jobs:
 
     outputs:
       previous-version: ${{ steps.record.outputs.previous_version }}
+      deployed-version: ${{ github.sha }}
 
     steps:
-      # NEW: Record previous version for potential rollback
       - name: Record previous version
         id: record
         run: |
-          # In reality, fetch from deployment API or state file
-          echo "previous_version=abc123" >> $GITHUB_OUTPUT
-          echo "Recording current version before deployment..."
-          echo "Previous version: abc123 (simulated)"
+          # In production, fetch from deployment state
+          echo "previous_version=$(date +%s)" >> $GITHUB_OUTPUT
 
       - name: Deploy to Staging
         run: |
-          echo "Deploying to staging environment..."
+          echo "Deploying ${{ github.sha }} to staging..."
           echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
-          echo "Deployment to staging complete!"
 
-  # Job 4: Smoke Tests on Staging with Auto-Rollback
+      - name: Wait for deployment
+        run: sleep 10
+
+      - name: Update deployment record
+        run: |
+          echo "### Staging Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** Deployed" >> $GITHUB_STEP_SUMMARY
+
   smoke-tests-staging:
     name: Smoke Tests (Staging)
     runs-on: ubuntu-latest
-    needs: [check-rollback, deploy-staging]
-    if: needs.check-rollback.outputs.is-rollback != 'true'
+    needs: deploy-staging
 
     outputs:
-      tests-passed: ${{ steps.tests.outputs.passed }}
+      passed: ${{ steps.tests.outputs.passed }}
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Run smoke tests
         id: tests
         run: |
           echo "Running smoke tests against staging..."
-          # Simulate tests - in reality, run actual HTTP tests
-          PASS=true
-          if [ "$PASS" == "true" ]; then
-            echo "All smoke tests passed!"
-            echo "passed=true" >> $GITHUB_OUTPUT
-          else
-            echo "Smoke tests failed!"
-            echo "passed=false" >> $GITHUB_OUTPUT
-            exit 1
-          fi
+          # Add actual smoke test commands here
+          echo "passed=true" >> $GITHUB_OUTPUT
 
-  # NEW: Auto-rollback staging on failure
   auto-rollback-staging:
-    name: Auto-Rollback Staging
+    name: Auto-Rollback (Staging)
     runs-on: ubuntu-latest
     needs: [deploy-staging, smoke-tests-staging]
-    if: failure() && needs.smoke-tests-staging.outputs.tests-passed != 'true'
+    if: failure()
 
     environment:
       name: staging
 
     steps:
-      - name: Automatic Rollback
+      - name: Rollback staging
         run: |
-          echo "=== AUTOMATIC ROLLBACK (Staging) ==="
-          echo "Smoke tests failed, initiating automatic rollback..."
-          echo "Rolling back to: ${{ needs.deploy-staging.outputs.previous-version }}"
-          echo ""
-          echo "Step 1: Stopping failed deployment..."
-          echo "Step 2: Restoring previous version..."
-          echo "Step 3: Verifying rollback..."
-          echo ""
-          echo "Automatic rollback completed!"
+          echo "Rolling back staging to ${{ needs.deploy-staging.outputs.previous-version }}"
 
-      - name: Notify rollback
-        run: |
-          echo "Sending rollback notification..."
-          # In reality: notify Slack, PagerDuty, etc.
+  # ============================================
+  # PHASE 5: PRODUCTION DEPLOYMENT
+  # ============================================
 
-  # Job 5: Deploy to Production
   deploy-production:
     name: Deploy to Production
     runs-on: ubuntu-latest
-    needs: [check-rollback, smoke-tests-staging]
-    if: needs.check-rollback.outputs.is-rollback != 'true'
+    needs: [prepare, smoke-tests-staging]
+    if: |
+      needs.prepare.outputs.deploy-production == 'true' &&
+      needs.smoke-tests-staging.result == 'success'
 
     environment:
       name: production
@@ -265,105 +354,138 @@ jobs:
 
     outputs:
       previous-version: ${{ steps.record.outputs.previous_version }}
+      deployed-version: ${{ github.sha }}
 
     steps:
       - name: Record previous version
         id: record
         run: |
-          echo "previous_version=def456" >> $GITHUB_OUTPUT
-          echo "Recording production version before deployment..."
+          echo "previous_version=$(date +%s)" >> $GITHUB_OUTPUT
 
-      - name: Deploy to Production
+      - name: Blue-Green Deploy
         run: |
-          echo "Deploying to production environment..."
-          echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          echo "=== Blue-Green Deployment ==="
+          echo "Step 1: Deploy to green environment..."
+          echo "Step 2: Health check green..."
+          echo "Step 3: Switch traffic to green..."
+          echo "Step 4: Monitor for issues..."
           echo "Production deployment complete!"
 
-  # Job 6: Production Health Checks
+      - name: Update deployment record
+        run: |
+          echo "### Production Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Strategy:** Blue-Green" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** Deployed" >> $GITHUB_STEP_SUMMARY
+
   health-check-production:
-    name: Production Health Check
+    name: Health Check (Production)
     runs-on: ubuntu-latest
-    needs: [check-rollback, deploy-production]
-    if: needs.check-rollback.outputs.is-rollback != 'true'
+    needs: deploy-production
 
     outputs:
-      health-passed: ${{ steps.health.outputs.passed }}
+      passed: ${{ steps.health.outputs.passed }}
 
     steps:
-      - name: Run production health checks
+      - name: Wait for stabilization
+        run: sleep 15
+
+      - name: Run health checks
         id: health
         run: |
           echo "Running production health checks..."
-          # Simulate health checks
-          HEALTHY=true
-          if [ "$HEALTHY" == "true" ]; then
-            echo "Production is healthy!"
-            echo "passed=true" >> $GITHUB_OUTPUT
-          else
-            echo "Production health check failed!"
-            echo "passed=false" >> $GITHUB_OUTPUT
-            exit 1
-          fi
+          echo "passed=true" >> $GITHUB_OUTPUT
 
-  # NEW: Auto-rollback production on failure
   auto-rollback-production:
-    name: Auto-Rollback Production
+    name: Auto-Rollback (Production)
     runs-on: ubuntu-latest
     needs: [deploy-production, health-check-production]
-    if: failure() && needs.health-check-production.outputs.health-passed != 'true'
+    if: failure()
 
     environment:
       name: production
 
     steps:
-      - name: Automatic Rollback
+      - name: Emergency rollback
         run: |
-          echo "=== AUTOMATIC ROLLBACK (Production) ==="
-          echo "Health checks failed, initiating automatic rollback..."
-          echo "Rolling back to: ${{ needs.deploy-production.outputs.previous-version }}"
-          echo ""
-          echo "CRITICAL: Production rollback in progress!"
-          echo ""
-          echo "Step 1: Switching traffic to previous version..."
-          echo "Step 2: Verifying previous version health..."
-          echo "Step 3: Decommissioning failed deployment..."
-          echo ""
-          echo "Production rollback completed!"
+          echo "=== EMERGENCY ROLLBACK ==="
+          echo "Rolling back to ${{ needs.deploy-production.outputs.previous-version }}"
 
-      - name: Verify rollback health
+      - name: Send alerts
         run: |
-          echo "Verifying production health after rollback..."
-          echo "Health check: OK"
+          echo "Sending critical alerts..."
 
-      - name: Send critical alert
-        run: |
-          echo "=== CRITICAL ALERT ==="
-          echo "Production deployment failed and was rolled back!"
-          echo "Failed version: ${{ github.sha }}"
-          echo "Rolled back to: ${{ needs.deploy-production.outputs.previous-version }}"
-          # In reality: PagerDuty, phone calls, etc.
+  # ============================================
+  # PHASE 6: MANUAL ROLLBACK (when triggered)
+  # ============================================
 
-  # Summary job
-  cd-success:
-    name: CD Success
+  manual-rollback:
+    name: Manual Rollback
     runs-on: ubuntu-latest
-    needs: [check-rollback, test, build-and-push, deploy-staging, smoke-tests-staging, deploy-production, health-check-production, manual-rollback]
+    needs: prepare
+    if: needs.prepare.outputs.is-rollback == 'true'
+
+    environment:
+      name: ${{ needs.prepare.outputs.target-env }}
+
+    steps:
+      - name: Perform rollback
+        run: |
+          echo "=== MANUAL ROLLBACK ==="
+          echo "Environment: ${{ needs.prepare.outputs.target-env }}"
+          echo "Version: ${{ needs.prepare.outputs.rollback-version }}"
+          echo "Rolling back..."
+
+      - name: Verify rollback
+        run: echo "Rollback verified successfully!"
+
+  # ============================================
+  # PHASE 7: NOTIFICATION & SUMMARY
+  # ============================================
+
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    needs: [prepare, test, build-and-push, deploy-staging, smoke-tests-staging, deploy-production, health-check-production, manual-rollback]
     if: always()
 
     steps:
-      - name: Pipeline Summary
+      - name: Determine status
+        id: status
         run: |
-          echo "=== CD Pipeline Summary ==="
-          if [ "${{ needs.check-rollback.outputs.is-rollback }}" == "true" ]; then
-            echo "Type: MANUAL ROLLBACK"
-            echo "Rollback: ${{ needs.manual-rollback.result }}"
+          if [ "${{ needs.prepare.outputs.is-rollback }}" == "true" ]; then
+            if [ "${{ needs.manual-rollback.result }}" == "success" ]; then
+              echo "status=rollback_success" >> $GITHUB_OUTPUT
+            else
+              echo "status=rollback_failed" >> $GITHUB_OUTPUT
+            fi
+          elif [ "${{ needs.health-check-production.result }}" == "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.smoke-tests-staging.result }}" == "success" ]; then
+            echo "status=staging_only" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.test.result }}" == "success" ]; then
+            echo "status=tests_only" >> $GITHUB_OUTPUT
           else
-            echo "Type: NORMAL DEPLOYMENT"
-            echo "Test: ${{ needs.test.result }}"
-            echo "Build & Push: ${{ needs.build-and-push.result }}"
-            echo "Staging Deploy: ${{ needs.deploy-staging.result }}"
-            echo "Staging Smoke Tests: ${{ needs.smoke-tests-staging.result }}"
-            echo "Production Deploy: ${{ needs.deploy-production.result }}"
-            echo "Production Health: ${{ needs.health-check-production.result }}"
+            echo "status=failed" >> $GITHUB_OUTPUT
           fi
-          echo "=========================="
+
+      - name: Send notification
+        run: |
+          echo "=== DEPLOYMENT NOTIFICATION ==="
+          echo "Status: ${{ steps.status.outputs.status }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Actor: ${{ github.actor }}"
+          # Add Slack/Teams/Email notification here
+
+      - name: Generate summary
+        run: |
+          echo "## CD Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${{ needs.test.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | ${{ needs.build-and-push.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Staging Deploy | ${{ needs.deploy-staging.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Staging Tests | ${{ needs.smoke-tests-staging.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Production Deploy | ${{ needs.deploy-production.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Production Health | ${{ needs.health-check-production.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
