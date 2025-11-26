@@ -3,12 +3,10 @@
 #
 # Prerequisites:
 # - Set up the following secrets in GitHub repository settings:
-#   - AZURE_CLIENT_ID: Service Principal App ID
-#   - AZURE_CLIENT_SECRET: Service Principal Password
-#   - AZURE_TENANT_ID: Azure Tenant ID
-#   - AZURE_SUBSCRIPTION_ID: Azure Subscription ID
 #   - VM_SSH_PRIVATE_KEY: SSH private key for VM access
-#   - VM_HOST: VM public IP or hostname
+#
+# - Set up the following variables in GitHub repository settings:
+#   - VM_HOST: VM public IP or hostname (use variable, not secret, so it shows in logs)
 #   - VM_USERNAME: VM username (default: azureuser)
 
 name: CD Pipeline
@@ -23,8 +21,6 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  # VM Configuration (not a secret - needed for deployment summary visibility)
-  VM_PUBLIC_IP: "20.234.216.56"
 
 jobs:
   # Job 1: Run tests
@@ -112,8 +108,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USERNAME }}
+          host: ${{ vars.VM_HOST }}
+          username: ${{ vars.VM_USERNAME }}
           key: ${{ secrets.VM_SSH_PRIVATE_KEY }}
           envs: GITHUB_TOKEN
           script: |
@@ -147,7 +143,7 @@ jobs:
       - name: Health check
         run: |
           echo "Running health check..."
-          curl -f "http://${{ env.VM_PUBLIC_IP }}:5000/health" || echo "Health check failed - container may still be starting"
+          curl -f "http://${{ vars.VM_HOST }}:5000/health" || echo "Health check failed - container may still be starting"
 
       - name: Deployment summary
         run: |
@@ -155,8 +151,8 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Application URL:** http://${{ env.VM_PUBLIC_IP }}:5000" >> $GITHUB_STEP_SUMMARY
+          echo "**Application URL:** http://${{ vars.VM_HOST }}:5000" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Endpoints" >> $GITHUB_STEP_SUMMARY
-          echo "- Health: http://${{ env.VM_PUBLIC_IP }}:5000/health" >> $GITHUB_STEP_SUMMARY
-          echo "- API Version: http://${{ env.VM_PUBLIC_IP }}:5000/api/version" >> $GITHUB_STEP_SUMMARY
+          echo "- Health: http://${{ vars.VM_HOST }}:5000/health" >> $GITHUB_STEP_SUMMARY
+          echo "- API Version: http://${{ vars.VM_HOST }}:5000/api/version" >> $GITHUB_STEP_SUMMARY

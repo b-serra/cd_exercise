@@ -225,34 +225,28 @@ az vm show \
 ssh -i ~/.ssh/cd-exercise-vm-key azureuser@<VM_IP> "curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker azureuser"
 ```
 
-#### Step 4: Configure GitHub Secrets
+#### Step 4: Configure GitHub Secrets and Variables
 
-Go to your repository **Settings > Secrets and variables > Actions** and add these secrets:
+Go to your repository **Settings > Secrets and variables > Actions**.
+
+**Secrets** (tab: Secrets) - these values are masked in logs:
 
 | Secret Name | Source | How to Get the Value |
 |-------------|--------|----------------------|
-| `AZURE_CLIENT_ID` | Service Principal `appId` | From Step 2 (instructor provided) |
-| `AZURE_CLIENT_SECRET` | Service Principal `password` | From Step 2 (instructor provided) |
-| `AZURE_TENANT_ID` | Service Principal `tenant` | `5ca2bc70-353c-4d1f-b7d7-7f2b2259df68` |
-| `AZURE_SUBSCRIPTION_ID` | Azure Subscription | Run: `az account show --query id -o tsv` |
-| `VM_HOST` | VM public IP | From Step 3.5 (`az vm show` output) |
-| `VM_USERNAME` | VM admin user | `azureuser` (fixed) |
 | `VM_SSH_PRIVATE_KEY` | SSH private key | Run: `cat ~/.ssh/cd-exercise-vm-key` (entire file content) |
 
-#### Step 5: Update Workflow with VM IP
+**Variables** (tab: Variables) - these values are visible in logs:
 
-Edit `.github/workflows/cd.yml` and update the `VM_PUBLIC_IP` environment variable with your VM's IP address:
+| Variable Name | Source | How to Get the Value |
+|---------------|--------|----------------------|
+| `VM_HOST` | VM public IP | From Step 3.5 (`az vm show` output) |
+| `VM_USERNAME` | VM admin user | `azureuser` (fixed) |
 
-```yaml
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-  VM_PUBLIC_IP: "<YOUR_VM_IP_HERE>"  # Update this!
-```
+> **Note:** We use Variables (not Secrets) for `VM_HOST` so the deployment URL is visible in the GitHub Actions summary. The IP address is not sensitive since it's publicly accessible.
 
-#### Step 6: Run the Pipeline
+#### Step 5: Run the Pipeline
 
-Once all secrets are configured:
+Once all secrets and variables are configured:
 
 1. Push a commit to the `07-azure-deploy` branch, or
 2. Go to **Actions > CD Pipeline > Run workflow** and select branch `07-azure-deploy`
