@@ -22,7 +22,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}
   # Azure Configuration
   AZURE_RESOURCE_GROUP: BCSAI2025-DEVOPS-PROFESSORS
-  AZURE_LOCATION: westeurope
+  AZURE_LOCATION: northeurope
   AZURE_CONTAINER_NAME: cd-exercise-app
 
 jobs:
