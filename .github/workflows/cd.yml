@@ -21,8 +21,8 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   # Azure Configuration
-  AZURE_RESOURCE_GROUP: cd-exercise-rg
-  AZURE_LOCATION: eastus
+  AZURE_RESOURCE_GROUP: BCSAI2025-DEVOPS-PROFESSORS
+  AZURE_LOCATION: westeurope
   AZURE_CONTAINER_NAME: cd-exercise-app
 
 jobs:
@@ -118,13 +118,6 @@ jobs:
               "tenantId": "${{ secrets.AZURE_TENANT_ID }}",
               "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
             }
-
-      - name: Create Resource Group (if not exists)
-        run: |
-          az group create \
-            --name ${{ env.AZURE_RESOURCE_GROUP }} \
-            --location ${{ env.AZURE_LOCATION }} \
-            --output none || true
 
       - name: Deploy to Azure Container Instances
         run: |
