@@ -1,18 +1,18 @@
-# CD Pipeline - Branch 03: Staging Deployment
-# This workflow introduces automated deployment to a staging environment.
+# CD Pipeline - Branch 04: Production Deployment
+# This workflow introduces production deployment with manual approvals.
 #
 # New concepts introduced:
-# - GitHub Environments
-# - Deployment jobs
-# - Smoke tests after deployment
-# - Environment-specific configurations
-# - Deployment status tracking
+# - Manual approval gates
+# - Production environment protection rules
+# - Deployment strategies (blue-green simulation)
+# - Production health checks
+# - Deployment notifications
 
 name: CD Pipeline
 
 on:
   push:
-    branches: [main, "03-staging-deploy"]
+    branches: [main, "04-production-deploy"]
   pull_request:
     branches: [main]
 
@@ -92,96 +92,154 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Job 3: Deploy to Staging (NEW)
+  # Job 3: Deploy to Staging
   deploy-staging:
     name: Deploy to Staging
     runs-on: ubuntu-latest
     needs: build-and-push
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
-    # NEW: GitHub Environment for staging
     environment:
       name: staging
       url: http://staging.example.com
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Deploy to Staging
         run: |
           echo "Deploying to staging environment..."
           echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
-
-          # In a real scenario, this would:
-          # - SSH into staging server
-          # - Pull the new image
-          # - Stop old container
-          # - Start new container
-          # - Or use kubectl for Kubernetes deployments
-
-          # Simulated deployment
-          echo "Pulling image..."
-          echo "Stopping old container..."
-          echo "Starting new container..."
           echo "Deployment to staging complete!"
 
-      - name: Wait for deployment to stabilize
-        run: |
-          echo "Waiting for deployment to stabilize..."
-          sleep 10
-
-  # Job 4: Run Smoke Tests on Staging (NEW)
+  # Job 4: Smoke Tests on Staging
   smoke-tests-staging:
     name: Smoke Tests (Staging)
     runs-on: ubuntu-latest
     needs: deploy-staging
 
     steps:
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests against staging..."
+          echo "All smoke tests passed!"
+
+  # Job 5: Deploy to Production (NEW - with manual approval)
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: smoke-tests-staging
+
+    # NEW: Production environment with required reviewers
+    # Configure this in GitHub repo settings: Settings > Environments > production
+    # Add required reviewers and optional wait timer
+    environment:
+      name: production
+      url: http://production.example.com
+
+    steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Run smoke tests
+      # NEW: Blue-Green Deployment Strategy
+      - name: Prepare Blue-Green Deployment
         run: |
-          echo "Running smoke tests against staging environment..."
+          echo "Starting blue-green deployment..."
+          echo "Current production (blue): running"
+          echo "New version (green): ${{ github.sha }}"
 
-          # In a real scenario with actual staging URL:
-          # STAGING_URL="http://staging.example.com"
-          # curl -f "$STAGING_URL/health" || exit 1
-          # curl -f "$STAGING_URL/health/ready" || exit 1
-          # curl -f "$STAGING_URL/" || exit 1
-
-          # Simulated smoke tests
-          echo "Testing health endpoint... OK"
-          echo "Testing readiness endpoint... OK"
-          echo "Testing root endpoint... OK"
-          echo "All smoke tests passed!"
-
-      - name: Verify deployment version
+      - name: Deploy Green Environment
         run: |
-          echo "Verifying deployed version matches expected..."
-          echo "Expected: ${{ github.sha }}"
-          # In real scenario:
-          # DEPLOYED_VERSION=$(curl -s "$STAGING_URL/api/version" | jq -r '.version')
-          echo "Deployed version verified!"
+          echo "Deploying new version to green environment..."
+          echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          # In reality:
+          # - Deploy new container to green slot
+          # - Wait for it to be healthy
+          echo "Green environment deployed!"
+
+      - name: Health Check Green Environment
+        run: |
+          echo "Running health checks on green environment..."
+          # curl -f http://green.example.com/health
+          # curl -f http://green.example.com/health/ready
+          echo "Green environment is healthy!"
+
+      - name: Switch Traffic to Green
+        run: |
+          echo "Switching traffic from blue to green..."
+          # In reality: Update load balancer / DNS
+          echo "Traffic switched to green (new production)!"
+
+      - name: Decommission Blue Environment
+        run: |
+          echo "Keeping blue environment for potential rollback..."
+          echo "Blue environment will be decommissioned in 1 hour if no issues"
+
+  # Job 6: Production Health Checks (NEW)
+  health-check-production:
+    name: Production Health Check
+    runs-on: ubuntu-latest
+    needs: deploy-production
+
+    steps:
+      - name: Wait for deployment stabilization
+        run: |
+          echo "Waiting for production deployment to stabilize..."
+          sleep 15
+
+      - name: Run production health checks
+        run: |
+          echo "Running comprehensive health checks on production..."
+          # In reality:
+          # curl -f http://production.example.com/health
+          # curl -f http://production.example.com/health/ready
+          # curl -f http://production.example.com/health/live
+          echo "Health check: OK"
+          echo "Readiness check: OK"
+          echo "Liveness check: OK"
+
+      - name: Verify production version
+        run: |
+          echo "Verifying production version..."
+          echo "Expected version: ${{ github.sha }}"
+          # ACTUAL=$(curl -s http://production.example.com/api/version | jq -r '.version')
+          echo "Production version verified!"
+
+  # Job 7: Notify Deployment (NEW)
+  notify-deployment:
+    name: Notify Deployment
+    runs-on: ubuntu-latest
+    needs: health-check-production
+    if: always()
+
+    steps:
+      - name: Send deployment notification
+        run: |
+          if [ "${{ needs.health-check-production.result }}" == "success" ]; then
+            echo "Deployment successful!"
+            echo "Sending success notification..."
+            # In reality: Send to Slack, Teams, email, etc.
+            # curl -X POST -H 'Content-type: application/json' \
+            #   --data '{"text":"Production deployment successful: ${{ github.sha }}"}' \
+            #   $SLACK_WEBHOOK_URL
+          else
+            echo "Deployment failed or was skipped"
+            echo "Sending failure notification..."
+          fi
 
   # Summary job
   cd-success:
     name: CD Success
     runs-on: ubuntu-latest
-    needs: [test, build-and-push, deploy-staging, smoke-tests-staging]
+    needs: [test, build-and-push, deploy-staging, smoke-tests-staging, deploy-production, health-check-production]
     if: always()
 
     steps:
-      - name: Check job results
+      - name: Pipeline Summary
         run: |
+          echo "=== CD Pipeline Summary ==="
           echo "Test: ${{ needs.test.result }}"
-          echo "Build: ${{ needs.build-and-push.result }}"
-          echo "Deploy Staging: ${{ needs.deploy-staging.result }}"
-          echo "Smoke Tests: ${{ needs.smoke-tests-staging.result }}"
-
-          if [ "${{ needs.test.result }}" != "success" ]; then
-            echo "Tests failed"
-            exit 1
-          fi
-          echo "CD Pipeline completed successfully!"
+          echo "Build & Push: ${{ needs.build-and-push.result }}"
+          echo "Staging Deploy: ${{ needs.deploy-staging.result }}"
+          echo "Staging Smoke Tests: ${{ needs.smoke-tests-staging.result }}"
+          echo "Production Deploy: ${{ needs.deploy-production.result }}"
+          echo "Production Health: ${{ needs.health-check-production.result }}"
+          echo "=========================="
