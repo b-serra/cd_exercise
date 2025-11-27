@@ -8,14 +8,20 @@ services:
       dockerfile: Dockerfile
       target: production
     ports:
-      - "5000:5000"
+      - "8000:8000"
     environment:
       - FLASK_ENV=development
       - APP_VERSION=0.1.0-dev
     volumes:
       - ./src:/app/src:ro
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -28,12 +34,18 @@ services:
       dockerfile: Dockerfile
       target: production
     ports:
-      - "5001:5000"
+      - "8001:8000"
     environment:
       - FLASK_ENV=staging
       - APP_VERSION=0.1.0-staging
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -51,7 +63,13 @@ services:
       - FLASK_ENV=production
       - APP_VERSION=0.1.0
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3

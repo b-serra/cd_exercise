@@ -70,7 +70,7 @@ python -m src.app.main
 
 # Run with Docker
 docker build -t cd-exercise .
-docker run -p 5000:5000 cd-exercise
+docker run -p 8000:8000 cd-exercise
 ```
 
 ### Run Tests

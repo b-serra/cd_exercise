@@ -5,9 +5,11 @@ A simple Flask API for demonstrating continuous deployment concepts.
 """
 
 import os
+
 from flask import Flask, jsonify
-from src.app.health import health_bp
+
 from src.app import __version__
+from src.app.health import health_bp
 
 
 def create_app():
@@ -24,37 +26,59 @@ def create_app():
     @app.route("/")
     def index():
         """Root endpoint - welcome message."""
-        return jsonify({
-            "message": "Welcome to CD Exercise API",
-            "version": app.config["VERSION"],
-            "environment": app.config["ENV"]
-        })
+        return jsonify(
+            {
+                "message": "Welcome to CD Exercise API",
+                "version": app.config["VERSION"],
+                "environment": app.config["ENV"],
+            }
+        )
 
     @app.route("/api/version")
     def version():
         """Return application version information."""
-        return jsonify({
-            "version": app.config["VERSION"],
-            "environment": app.config["ENV"],
-            "python_version": os.popen("python --version").read().strip()
-        })
+        return jsonify(
+            {
+                "version": app.config["VERSION"],
+                "environment": app.config["ENV"],
+                "python_version": os.popen("python --version").read().strip(),
+            }
+        )
 
     @app.route("/api/info")
     def info():
         """Return application information."""
-        return jsonify({
-            "name": "CD Exercise API",
-            "description": "A Flask API for learning continuous deployment",
-            "version": app.config["VERSION"],
-            "endpoints": [
-                {"path": "/", "method": "GET", "description": "Welcome message"},
-                {"path": "/health", "method": "GET", "description": "Health check"},
-                {"path": "/health/ready", "method": "GET", "description": "Readiness probe"},
-                {"path": "/health/live", "method": "GET", "description": "Liveness probe"},
-                {"path": "/api/version", "method": "GET", "description": "Version info"},
-                {"path": "/api/info", "method": "GET", "description": "API information"}
-            ]
-        })
+        return jsonify(
+            {
+                "name": "CD Exercise API",
+                "description": "A Flask API for learning continuous deployment",
+                "version": app.config["VERSION"],
+                "endpoints": [
+                    {"path": "/", "method": "GET", "description": "Welcome message"},
+                    {"path": "/health", "method": "GET", "description": "Health check"},
+                    {
+                        "path": "/health/ready",
+                        "method": "GET",
+                        "description": "Readiness probe",
+                    },
+                    {
+                        "path": "/health/live",
+                        "method": "GET",
+                        "description": "Liveness probe",
+                    },
+                    {
+                        "path": "/api/version",
+                        "method": "GET",
+                        "description": "Version info",
+                    },
+                    {
+                        "path": "/api/info",
+                        "method": "GET",
+                        "description": "API information",
+                    },
+                ],
+            }
+        )
 
     return app
 
@@ -64,6 +88,6 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
+    port = int(os.getenv("PORT", 8000))
     debug = os.getenv("FLASK_ENV", "development") == "development"
     app.run(host="0.0.0.0", port=port, debug=debug)
