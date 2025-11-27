@@ -40,9 +40,9 @@ def readiness():
     """
     # Simulate readiness checks
     checks = {
-        "database": True,  # Would check DB connection
-        "cache": True,     # Would check cache connection
-        "dependencies": True  # Would check external services
+        "database": True,
+        "cache": True,
+        "dependencies": True
     }
 
     all_ready = all(checks.values())
@@ -58,9 +58,6 @@ def readiness():
 def liveness():
     """
     Liveness probe for Kubernetes.
-
-    Indicates if the application is alive and should not be restarted.
-    A simple response indicates the process is running.
     """
     return jsonify({
         "status": "alive",

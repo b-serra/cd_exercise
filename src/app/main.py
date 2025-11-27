@@ -14,16 +14,13 @@ def create_app():
     """Create and configure the Flask application."""
     app = Flask(__name__)
 
-    # Configuration from environment
     app.config["ENV"] = os.getenv("FLASK_ENV", "development")
     app.config["VERSION"] = os.getenv("APP_VERSION", __version__)
 
-    # Register blueprints
     app.register_blueprint(health_bp)
 
     @app.route("/")
     def index():
-        """Root endpoint - welcome message."""
         return jsonify({
             "message": "Welcome to CD Exercise API",
             "version": app.config["VERSION"],
@@ -32,7 +29,6 @@ def create_app():
 
     @app.route("/api/version")
     def version():
-        """Return application version information."""
         return jsonify({
             "version": app.config["VERSION"],
             "environment": app.config["ENV"],
@@ -41,7 +37,6 @@ def create_app():
 
     @app.route("/api/info")
     def info():
-        """Return application information."""
         return jsonify({
             "name": "CD Exercise API",
             "description": "A Flask API for learning continuous deployment",
@@ -59,7 +54,6 @@ def create_app():
     return app
 
 
-# Create app instance
 app = create_app()
 
 
