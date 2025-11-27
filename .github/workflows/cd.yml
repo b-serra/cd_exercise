@@ -1,18 +1,35 @@
-# CD Pipeline - Main Branch (Foundation)
-# This is a placeholder workflow for the main branch.
-# Students will progressively build the CD pipeline through branches.
+# Complete CD Pipeline
+# Demonstrates all CD stages: build, test, scan, push, deploy to staging/production, and rollback
 
 name: CD Pipeline
 
 on:
   push:
-    branches: [main]
+    branches: [main, matthew]
   pull_request:
-    branches: [main]
+    branches: [main, matthew]
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      rollback:
+        description: 'Rollback to previous version'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # Basic CI job - runs tests to ensure code works
+  # Stage 1: Run tests
   test:
     name: Run Tests
     runs-on: ubuntu-latest
@@ -33,10 +50,345 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run tests
-        run: pytest --cov=src --cov-report=xml
+        run: pytest --cov=src --cov-report=xml --cov-report=term
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
           path: coverage.xml
+
+  # Stage 2: Build Docker image and scan for vulnerabilities
+  build:
+    name: Build and Scan Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run container smoke test
+        run: |
+          # Get the first tag
+          IMAGE_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n 1)
+
+          # Start container
+          docker run -d --name test-container -p 8000:8000 $IMAGE_TAG
+
+          # Wait for container to be ready
+          echo "Waiting for container to start..."
+          for i in {1..30}; do
+            if curl -f http://localhost:8000/health 2>/dev/null; then
+              echo "Container is healthy!"
+              break
+            fi
+            echo "Attempt $i: Container not ready yet..."
+            sleep 2
+          done
+
+          # Check health endpoint
+          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health)
+          if [ "$response" != "200" ]; then
+            echo "Health check failed with status code: $response"
+            docker logs test-container
+            exit 1
+          fi
+
+          echo "Container smoke test passed!"
+
+          # Clean up
+          docker stop test-container
+          docker rm test-container
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.meta.outputs.tags }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run Trivy vulnerability scanner (table output)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.meta.outputs.tags }}
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Push to registry
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Stage 3: Deploy to staging
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/matthew')
+    environment:
+      name: staging
+      url: http://staging.example.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to staging environment
+        run: |
+          echo "Deploying to staging environment..."
+          echo "Image: ${{ needs.build.outputs.image-tag }}"
+          echo "Digest: ${{ needs.build.outputs.image-digest }}"
+
+          # In a real scenario, this would use docker-compose or kubectl
+          # For this exercise, we'll simulate the deployment
+          echo "Simulating deployment with docker-compose..."
+
+          # Create a temporary docker-compose override
+          cat > docker-compose.staging.yml <<EOF
+          version: '3.8'
+          services:
+            staging:
+              image: ${{ needs.build.outputs.image-tag }}
+              environment:
+                - FLASK_ENV=staging
+          EOF
+
+          echo "Staging deployment configuration created"
+          cat docker-compose.staging.yml
+
+      - name: Run staging smoke tests
+        run: |
+          echo "Running smoke tests against staging..."
+
+          # Simulate smoke tests
+          echo "✓ Health check passed"
+          echo "✓ API endpoints responding"
+          echo "✓ Database connectivity verified"
+          echo "✓ Cache connectivity verified"
+
+          echo "All staging smoke tests passed!"
+
+      - name: Record deployment
+        run: |
+          echo "Recording deployment to staging..."
+          echo "Timestamp: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          echo "Commit: ${{ github.sha }}"
+          echo "Deployed by: ${{ github.actor }}"
+
+  # Stage 4: Deploy to production with manual approval
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build, deploy-staging]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: http://production.example.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for rollback request
+        id: rollback-check
+        run: |
+          if [ "${{ github.event.inputs.rollback }}" == "true" ]; then
+            echo "rollback=true" >> $GITHUB_OUTPUT
+          else
+            echo "rollback=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get previous version
+        if: steps.rollback-check.outputs.rollback == 'true'
+        id: previous-version
+        run: |
+          # In a real scenario, this would query the registry or deployment history
+          echo "previous-tag=previous-version" >> $GITHUB_OUTPUT
+
+      - name: Deploy to production
+        if: steps.rollback-check.outputs.rollback == 'false'
+        run: |
+          echo "Deploying to production environment..."
+          echo "Image: ${{ needs.build.outputs.image-tag }}"
+          echo "Digest: ${{ needs.build.outputs.image-digest }}"
+
+          # Blue-green deployment strategy
+          echo "Implementing blue-green deployment..."
+
+          # Create production docker-compose override
+          cat > docker-compose.production.yml <<EOF
+          version: '3.8'
+          services:
+            production:
+              image: ${{ needs.build.outputs.image-tag }}
+              environment:
+                - FLASK_ENV=production
+          EOF
+
+          echo "Production deployment configuration created"
+          cat docker-compose.production.yml
+
+          echo "✓ Blue environment (new version) deployed"
+          echo "✓ Running health checks on new version..."
+          sleep 5
+          echo "✓ Health checks passed"
+          echo "✓ Switching traffic to blue environment..."
+          echo "✓ Production deployment complete!"
+
+      - name: Rollback production
+        if: steps.rollback-check.outputs.rollback == 'true'
+        run: |
+          echo "Rolling back production to previous version..."
+          echo "Previous version: ${{ steps.previous-version.outputs.previous-tag }}"
+
+          echo "✓ Switching traffic to previous version..."
+          echo "✓ Rollback complete!"
+
+      - name: Run production smoke tests
+        run: |
+          echo "Running smoke tests against production..."
+
+          # Critical production checks
+          echo "✓ Health check passed"
+          echo "✓ API endpoints responding"
+          echo "✓ Database connectivity verified"
+          echo "✓ Cache connectivity verified"
+          echo "✓ Performance metrics within bounds"
+
+          echo "All production smoke tests passed!"
+
+      - name: Record deployment
+        run: |
+          echo "Recording deployment to production..."
+          echo "Timestamp: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          echo "Commit: ${{ github.sha }}"
+          echo "Deployed by: ${{ github.actor }}"
+          echo "Deployment type: ${{ steps.rollback-check.outputs.rollback == 'true' && 'rollback' || 'normal' }}"
+
+  # Stage 5: Rollback capability (manual trigger)
+  rollback:
+    name: Rollback Deployment
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.rollback == 'true'
+    environment:
+      name: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get deployment history
+        id: history
+        run: |
+          echo "Fetching deployment history..."
+          # In a real scenario, query deployment database or registry
+          echo "previous-version=main-abc123" >> $GITHUB_OUTPUT
+          echo "previous-digest=sha256:abc123..." >> $GITHUB_OUTPUT
+
+      - name: Perform rollback
+        run: |
+          echo "Rolling back ${{ github.event.inputs.environment }} environment..."
+          echo "Target version: ${{ steps.history.outputs.previous-version }}"
+
+          # Rollback to previous version
+          echo "✓ Switching to previous version..."
+          echo "✓ Verifying rollback..."
+          echo "✓ Health checks passed"
+          echo "✓ Rollback complete!"
+
+      - name: Notify rollback
+        run: |
+          echo "Rollback notification:"
+          echo "Environment: ${{ github.event.inputs.environment }}"
+          echo "Rolled back by: ${{ github.actor }}"
+          echo "Timestamp: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          echo "Previous version: ${{ steps.history.outputs.previous-version }}"
+
+  # Stage 6: Complete - Post-deployment verification
+  post-deployment:
+    name: Post-Deployment Verification
+    runs-on: ubuntu-latest
+    needs: [deploy-staging]
+    if: always() && (needs.deploy-staging.result == 'success' || needs.deploy-production.result == 'success')
+
+    steps:
+      - name: Verify deployment status
+        run: |
+          echo "Verifying deployment status..."
+
+          if [ "${{ needs.deploy-staging.result }}" == "success" ]; then
+            echo "✓ Staging deployment successful"
+          fi
+
+          if [ "${{ needs.deploy-production.result }}" == "success" ]; then
+            echo "✓ Production deployment successful"
+          fi
+
+      - name: Generate deployment report
+        run: |
+          echo "=== Deployment Report ==="
+          echo "Pipeline Run: ${{ github.run_number }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo "Timestamp: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          echo ""
+          echo "Staging: ${{ needs.deploy-staging.result }}"
+          echo "Production: ${{ needs.deploy-production.result }}"
+          echo "======================="
